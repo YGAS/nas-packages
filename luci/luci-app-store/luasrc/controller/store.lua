@@ -4,14 +4,21 @@ local myopkg = "is-opkg"
 local opkg = "opkg"
 
 function index()
+    local function store_api(action, onlypost)
+        local e = entry({"admin", "store", action}, onlypost and post("store_action", {action = action}) or call("store_action", {action = action}))
+        e.dependent = false -- 父节点不是必须的
+        e.leaf = true -- 没有子节点
+    end
+
     local action
+
     entry({"admin", "store"}, alias("admin", "store", "token"))
     entry({"admin", "store", "token"}, call("store_token"))
     for _, action in ipairs({"update", "install", "upgrade", "remove"}) do
-        entry({"admin", "store", action}, post("store_action", {action = action}))
+        store_api(action, true)
     end
     for _, action in ipairs({"status"}) do
-        entry({"admin", "store", action}, call("store_action", {action = action}))
+        store_api(action, false)
     end
 end
 
@@ -38,33 +45,36 @@ local function _action(exe, cmd, ...)
 end
 
 function store_action(param)
-    local code, out, err
-    local sys  = require "luci.sys"
+    local code, out, err, ret
+    local ipkg = require "luci.model.ipkg"
     local action = param.action or ""
-    local pkgs = luci.http.formvalue("packages") or {}
 
-    if action == "" then
-        luci.http.status(400, "Bad Request")
-        return nil
-    end
-
-    if not (type(pkgs) == "table") then
-        pkgs = {pkgs}
-    end
-    if action == "update" or action == "install" or action == "upgrade" then
-        code, out, err = _action(myopkg, action, unpack(pkgs))
+    if action == "status" then
+        ret = {
+            code = 0,
+            data = ipkg.status(luci.http.formvalue("package"))
+        }
     else
-        code, out, err = _action(opkg, action, unpack(pkgs))
-    end
+        local pkgs = luci.http.formvalue("packages") or {}
 
-    local status = {
-        code = code,
-        stdout = out,
-        stderr = err
-    }
+        if type(pkgs) ~= "table" then
+            pkgs = {pkgs}
+        end
+        if action == "update" or action == "install" or action == "upgrade" then
+            code, out, err = _action(myopkg, action, unpack(pkgs))
+        else
+            code, out, err = _action(opkg, action, unpack(pkgs))
+        end
+
+        ret = {
+            code = code,
+            stdout = out,
+            stderr = err
+        }
+    end
 
     luci.http.prepare_content("application/json")
-    luci.http.write_json(status)
+    luci.http.write_json(ret)
 end
 
 function store_token()
